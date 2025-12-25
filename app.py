@@ -2,6 +2,7 @@ import os
 import gradio as gr
 from dotenv import load_dotenv
 from pypdf import PdfReader
+from docx import Document  
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -28,6 +29,16 @@ def get_text_from_pdf(pdf_file):
     except Exception as e:
         return ""
 
+def get_text_from_docx(docx_file):  
+    try:
+        doc = Document(docx_file.name)
+        text = ""
+        for para in doc.paragraphs:
+            text += para.text + "\n"
+        return text
+    except Exception as e:
+        return ""
+
 def split_text(text, chunk_size=1000, overlap=200):
     chunks = []
     start = 0
@@ -37,25 +48,35 @@ def split_text(text, chunk_size=1000, overlap=200):
         start += (chunk_size - overlap)
     return chunks
 
-def rag_pipeline(pdf_file, user_question, chat_history):
+# --- MAIN PIPELINE ---
+
+def rag_pipeline(file_obj, user_question, chat_history):
     if chat_history is None:
         chat_history = []
 
     if not user_question.strip():
         return "", chat_history
 
-    # 1. Add User Question to History (UI State)
+    # 1. Add User Question to History
     chat_history.append({"role": "user", "content": user_question})
 
-    if not pdf_file:
-        chat_history.append({"role": "assistant", "content": "⚠️ Please upload a PDF file first."})
+    if not file_obj:
+        chat_history.append({"role": "assistant", "content": "⚠️ Please upload a PDF or DOCX file."})
         return "", chat_history
 
     try:
-        # --- A. Process PDF ---
-        raw_text = get_text_from_pdf(pdf_file)
+        # --- A. Detect File Type & Extract Text ---
+        filename = file_obj.name.lower()
+        if filename.endswith(".pdf"):
+            raw_text = get_text_from_pdf(file_obj)
+        elif filename.endswith(".docx"):
+            raw_text = get_text_from_docx(file_obj) # <--- CALL NEW FUNCTION
+        else:
+            chat_history.append({"role": "assistant", "content": "⚠️ Unsupported file type. Please use PDF or DOCX."})
+            return "", chat_history
+
         if not raw_text:
-            chat_history.append({"role": "assistant", "content": "⚠️ Error: The PDF appears to be empty."})
+            chat_history.append({"role": "assistant", "content": "⚠️ Error: The file appears to be empty or unreadable."})
             return "", chat_history
             
         chunks = split_text(raw_text)
@@ -65,29 +86,27 @@ def rag_pipeline(pdf_file, user_question, chat_history):
         index = faiss.IndexFlatL2(embeddings.shape[1])
         index.add(embeddings)
         
+        # --- C. Search ---
         question_embedding = embedder.encode([user_question])
         distances, indices = index.search(question_embedding, k=3)
         retrieved_context = "\n\n".join([chunks[i] for i in indices[0]])
 
-        # --- C. BUILD CLEAN API MESSAGES (CRITICAL FIX) ---
-        # We must create a NEW list for Groq that DOES NOT contain Gradio's 'metadata'
-        
+        # --- D. Clean API Messages ---
         system_prompt = {
             "role": "system", 
-            "content": f"You are a helpful assistant. Use the context below to answer. If the answer is not in the context, say 'I don't know based on this document'.\n\nCONTEXT:\n{retrieved_context}"
+            "content": f"You are a helpful assistant. Use the context below to answer. If unsure, say 'I don't know'.\n\nCONTEXT:\n{retrieved_context}"
         }
         
-        # Start with System Prompt
         api_messages = [system_prompt]
         
-        # Loop through history and ONLY copy 'role' and 'content'
+        # Sanitize History (Strip Metadata)
         for msg in chat_history:
             api_messages.append({
                 "role": msg.get("role"),
                 "content": msg.get("content")
             })
 
-        # --- D. Call API ---
+        # --- E. Call API ---
         chat_completion = client.chat.completions.create(
             messages=api_messages,
             model="llama-3.1-8b-instant",
@@ -96,7 +115,7 @@ def rag_pipeline(pdf_file, user_question, chat_history):
         
         bot_answer = chat_completion.choices[0].message.content
         
-        # 2. Add Bot Answer to History (UI State)
+        # 2. Add Bot Answer to History
         chat_history.append({"role": "assistant", "content": bot_answer})
         
         return "", chat_history
@@ -106,25 +125,21 @@ def rag_pipeline(pdf_file, user_question, chat_history):
         return "", chat_history
 
 # --- UI SETUP ---
-with gr.Blocks(title="RAG Chatbot with Memory") as demo:
+with gr.Blocks(title="RAG Chatbot with DOCX Support") as demo:
     gr.Markdown("""
-    # 🤖 RAG Chatbot (With Memory)
-    Upload a PDF and ask questions. I can now remember what we discussed earlier!
+    # 🤖 RAG Chatbot (PDF & Word Support)
+    Upload a document (.pdf or .docx) and ask questions. I remember context!
     """)
     
     with gr.Row():
         with gr.Column(scale=1):
             gr.Markdown("### 1. Upload Document")
-            pdf_input = gr.File(label="Upload PDF", file_types=[".pdf"])
+            # UPDATED: Accept both file types
+            file_input = gr.File(label="Upload File", file_types=[".pdf", ".docx"])
 
         with gr.Column(scale=2):
             gr.Markdown("### 2. Chat Interface")
-            
-            # Use standard Chatbot. 
-            # Note: We removed 'type="messages"' to support your version, 
-            # but we are manually feeding it dictionaries in the function above.
             chatbot_output = gr.Chatbot(label="Conversation", height=500)
-            
             user_input = gr.Textbox(label="Your Question", placeholder="Ask something...")
             
             with gr.Row():
@@ -134,13 +149,13 @@ with gr.Blocks(title="RAG Chatbot with Memory") as demo:
     # --- EVENT LISTENERS ---
     submit_btn.click(
         fn=rag_pipeline, 
-        inputs=[pdf_input, user_input, chatbot_output], 
+        inputs=[file_input, user_input, chatbot_output], 
         outputs=[user_input, chatbot_output] 
     )
     
     user_input.submit(
         fn=rag_pipeline, 
-        inputs=[pdf_input, user_input, chatbot_output], 
+        inputs=[file_input, user_input, chatbot_output], 
         outputs=[user_input, chatbot_output]
     )
 
