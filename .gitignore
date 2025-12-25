@@ -1,4 +1,12 @@
-venv/
-.env
 __pycache__/
-*.pdf
+*.pyc
+
+.env
+
+venv/
+.venv/
+
+.gradio/
+flagged/
+
+.vscode/

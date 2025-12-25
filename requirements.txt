@@ -1,9 +1,8 @@
-langchain
-langchain-groq
-langchain-community
-langchain-huggingface
+groq
+sentence-transformers
 faiss-cpu
 pypdf
 gradio
 python-dotenv
-sentence-transformers
+numpy>=2.1.0
+aiohttp>=3.10.2
