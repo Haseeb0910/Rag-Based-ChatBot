@@ -6,3 +6,4 @@ gradio
 python-dotenv
 numpy>=2.1.0
 aiohttp>=3.10.2
+python-docx
