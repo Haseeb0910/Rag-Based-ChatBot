@@ -1,4 +1,3 @@
-Markdown
 
 # 📚 RAG Chatbot with Conversational Memory & Multi-Format Support
 
@@ -44,7 +43,7 @@ Follow these steps to run the project locally on your machine.
 
 ### 1. Clone the Repository
 ```bash
-git clone [https://github.com/](https://github.com/)[YOUR_USERNAME]/rag-chatbot.git
+git clone https://github.com/Haseeb0910/Rag-Based-ChatBot.git
 cd rag-chatbot
 2. Create a Virtual Environment (Recommended)
 Bash
